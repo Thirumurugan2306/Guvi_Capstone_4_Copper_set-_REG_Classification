@@ -5,22 +5,10 @@ import pandas as pd
 from scipy.stats import skew
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.linear_model import LinearRegression, ElasticNet, LassoLars
-from sklearn.neighbors import KNeighborsRegressor
-from sklearn.tree import DecisionTreeRegressor
 from sklearn.ensemble import ExtraTreesRegressor
-from sklearn.linear_model import LogisticRegression
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.ensemble import AdaBoostClassifier, RandomForestClassifier, ExtraTreesClassifier
-from xgboost import XGBClassifier
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.naive_bayes import GaussianNB
-from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
-from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, roc_auc_score
-import joblib
-import matplotlib.pyplot as plt
+from sklearn.ensemble import RandomForestClassifier
 import pickle
-import streamlit as st
+
 
 # Define a function for Streamlit page configuration
 def page_config():
