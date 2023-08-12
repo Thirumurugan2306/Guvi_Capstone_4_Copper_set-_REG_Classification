@@ -8,8 +8,6 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.ensemble import ExtraTreesRegressor
 from sklearn.ensemble import RandomForestClassifier
 import pickle
-
-
 # Define a function for Streamlit page configuration
 def page_config():
     st.set_page_config(
@@ -211,10 +209,12 @@ def Regression_model():
             x = user_input[['quantity_tons', 'country', 'application', 'thickness', 'width', 'delivery_period']].values
             x = scaler.transform(x)
             predicted_price = model.predict(x)
+            try:
+                predicted_price = float(predicted_price)  # Convert to float
+                st.success(f"Predicted Selling Price: {predicted_price:.2f}")
+            except ValueError:
+                st.error("Error in predicting the selling price.")
 
-            st.success(f"Predicted Selling Price: {predicted_price:.2f}")
-            container = st.container()
-            container.write(f"Predicted Selling Price: {predicted_price:.2f}")
 
 # Define a function to train classification models
 def train_classification(df):
@@ -275,7 +275,7 @@ def train_classification(df):
         country = st.number_input("",value=10)
         
         st.markdown("<h4 class='custom-header'>Application</h4>", unsafe_allow_html=True)
-        application = st.number_input("",Value=5)
+        application = st.number_input("",Value=0)
         
         st.markdown("<h4 class='custom-header'>Thickness</h4>", unsafe_allow_html=True)
         thickness = st.number_input("", value=5.0, format="%.2f")
