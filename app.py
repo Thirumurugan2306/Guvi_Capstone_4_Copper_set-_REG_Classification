@@ -1,7 +1,10 @@
+import streamlit as st
+from streamlit_option_menu import option_menu
 import numpy as np
 import pandas as pd
+from scipy.stats import skew
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.linear_model import LinearRegression, ElasticNet, LassoLars
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.tree import DecisionTreeRegressor
@@ -12,23 +15,92 @@ from sklearn.ensemble import AdaBoostClassifier, RandomForestClassifier, ExtraTr
 from xgboost import XGBClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.naive_bayes import GaussianNB
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, roc_auc_score
+import joblib
 import matplotlib.pyplot as plt
 import pickle
 import streamlit as st
 
+# Define a function for Streamlit page configuration
+def page_config():
+    st.set_page_config(
+        page_title="Industrial Copper Modelling",
+        layout="wide",
+    )
+    
+    # Add background image using Markdown
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            background-image: url("https://images.unsplash.com/photo-1496247749665-49cf5b1022e9?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=2073&q=80");
+            background-attachment: scroll;
+            background-size: cover;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+    
+    # Custom CSS style for the title
+    custom_style = """
+    <style>
+    h1 {
+        color: #B87333;
+        background-color: white; /* Change this to the highlight color you want */
+        padding: 5px;
+        border-radius: 5px;
+        text-align: center;
+    }
+    </style>
+    """
+    # Display the custom CSS style using st.markdown
+    st.markdown(custom_style, unsafe_allow_html=True)
+    # Display the title using h1 HTML tag
+    st.markdown("<h1>Industrial Copper Modeling</h1>", unsafe_allow_html=True)
+    st.write('')
 
+# Define a function to display the navigation menu
+def display_navigation():
+    col1, col2, col3 = st.columns(3)
+    
+    with col2:
+        selected = option_menu(
+                menu_title="Select the Model",
+                options=["Regression", "Classification"],
+                orientation="horizontal",
+                styles={
+                    "container": {"margin": "1", "padding": "2!important", "background-color": "White"},
+                    "nav-link": {"font-size": "10px", "text-align": "center", "margin": "0.5px", "--hover-color": "#B87333"},
+                    "nav-link-selected": {"background-color": "#B87333"},
+                }
+            )
+        return selected
+
+# Define a function to preprocess the data
 def preprocess_data(df):
     # Preprocess the DataFrame
+    
+    # Convert date columns to datetime format
     df['item_date'] = pd.to_datetime(df['item_date'], format='%Y%m%d', errors='coerce')
+    df['delivery date'] = pd.to_datetime(df['delivery date'], format='%Y%m%d', errors='coerce')
+    
+    # Rename a column
     df.rename(columns={'quantity tons': 'quantity_tons'}, inplace=True)
+    
+    # Convert quantity_tons column to float64
     df['quantity_tons'] = df['quantity_tons'].replace('e', np.NaN).astype('float64').abs()
     df['quantity_tons'] = df['quantity_tons'].map('{:.2f}'.format)
     df['quantity_tons'] = pd.to_numeric(df['quantity_tons'], errors='coerce')
+    
+    # Set material_ref to None for specific cases
     df.loc[df['material_ref'].astype(str).str.startswith('00000'), 'material_ref'] = None
+    
+    # Convert product_ref column to string
     df['product_ref'] = df['product_ref'].astype(str)
-    df['delivery date'] = pd.to_datetime(df['delivery date'], format='%Y%m%d', errors='coerce')
 
+    # Fill missing values in specific columns
     mode = ['item_date', 'customer', 'status', 'item type', 'application', 'material_ref', 'country', 'delivery date', 'product_ref']
     mean = ['quantity_tons', 'thickness', 'width', 'selling_price']
     columns = list(df.columns)
@@ -39,8 +111,8 @@ def preprocess_data(df):
         elif i in mean:
             df[i].fillna(df[i].mean(), inplace=True)
 
+# Define a function to remove outliers using IQR method
 def remove_outliers(df):
-    # Remove outliers using IQR method
     continuous_columns = df.select_dtypes(include=[np.float64, np.int64]).columns
     q1 = df[continuous_columns].quantile(0.25)
     q3 = df[continuous_columns].quantile(0.75)
@@ -50,182 +122,231 @@ def remove_outliers(df):
     df = df[((df[continuous_columns] >= lower_bound) & (df[continuous_columns] <= upper_bound)).all(axis=1)]
     return df
 
+# Define a function to transform skewed columns using log transformation
 def transform_skewed_columns(df):
-    # Transform skewed columns using log transformation
     continuous_columns = df.select_dtypes(include=[np.float64, np.int64]).columns
     skewness = df[continuous_columns].apply(lambda x: skew(x))
     skewed_columns = skewness[skewness > 0.5].index
     df[skewed_columns] = df[skewed_columns].apply(lambda x: np.log1p(x))
+    df['delivery_period'] = (df['item_date'] - df['delivery date']).abs().dt.days
 
-def train_regression_models(X_train, X_test, Y_train, Y_test):
-    # Train regression models and evaluate them
-    models = [
-        LinearRegression(),
-        ElasticNet(),
-        LassoLars(),
-        KNeighborsRegressor(),
-        DecisionTreeRegressor(),
-        ExtraTreesRegressor()
-    ]
-
-    model_names = ['Linear Regression', 'ElasticNet', 'LassoLars', 'KNeighbors', 'Decision Tree', 'Extra Trees']
-    mse_scores = []
-    r2_scores = []
-    mae_scores = []
-    for model, model_name in zip(models, model_names):
-        model.fit(X_train, Y_train)
-        y_pred = model.predict(X_test)
-        mse = mean_squared_error(Y_test, y_pred)
-        r2 = r2_score(Y_test, y_pred)
-        mae = mean_absolute_error(Y_test, y_pred)
-        mse_scores.append(mse)
-        r2_scores.append(r2)
-        mae_scores.append(mae)
-        print(f"{model_name} - Mean Squared Error: {mse:.4f}, R-squared: {r2:.4f}, Mean Absolute Error: {mae:.4f}")
-    return mse_scores, r2_scores, mae_scores
-
-def train_classification_models(X_train, X_test, y_train, y_test):
-    # Train classification models and evaluate them
-    models = [
-        LogisticRegression(),
-        KNeighborsClassifier(),
-        AdaBoostClassifier(),
-        DecisionTreeClassifier(),
-        GaussianNB(),
-        RandomForestClassifier(),
-        ExtraTreesClassifier(),
-        XGBClassifier()
-    ]
-
-    model_names = ['Logistic Regression', 'KNeighbors', 'AdaBoost', 'Decision Tree', 'GaussianNB', 'Random Forest',
-               'Extra Trees', 'XGBoost']
-    accuracy_scores = []
-    f1_scores = []
-    roc_auc_scores = []
-    conf_matrices = []
-    for model, model_name in zip(models, model_names):
-        model.fit(X_train, y_train)
-        y_pred = model.predict(X_test)
-        accuracy = accuracy_score(y_test, y_pred)
-        f1 = f1_score(y_test, y_pred)
-        roc_auc = roc_auc_score(y_test, y_pred)
-        conf_matrix = confusion_matrix(y_test, y_pred)
-        accuracy_scores.append(accuracy)
-        f1_scores.append(f1)
-        roc_auc_scores.append(roc_auc)
-        conf_matrices.append(conf_matrix)
-        print(f"{model_name} - Accuracy: {accuracy:.4f}, F1 Score: {f1:.4f}, ROC AUC: {roc_auc:.4f}")
-    return accuracy_scores, f1_scores, roc_auc_scores, conf_matrices
-
-def save_model_artifacts(scaler, model, filename):
-    with open(filename, 'wb') as f:
+# Define a function to train regression models
+def train_regression_models(df):
+    x = df[['quantity_tons', 'country', 'application', 'thickness', 'width', 'delivery_period']].values
+    y = df[['selling_price']].values
+    scaler = StandardScaler().fit(x)
+    
+    # Saving scaler to a pickle file
+    with open('scaling_regression.pkl', 'wb') as f:
         pickle.dump(scaler, f)
+    
+    # Transform training data
+    x = scaler.transform(x)
+    
+    # Split train and test data
+    X_train, X_test, Y_train, Y_test = train_test_split(x, y.reshape(-1), test_size=0.2)
+    
+    model = ExtraTreesRegressor(random_state=42)  # Initialize the Extra Trees model
+    model.fit(X_train, Y_train)
+
+    # Saving the trained model to a pickle file
+    with open('extra_trees_regression_model.pkl', 'wb') as f:
         pickle.dump(model, f)
-
-def load_model_artifacts(filename):
-    with open(filename, 'rb') as f:
-        scaler = pickle.load(f)
-        model = pickle.load(f)
-    return scaler, model
-
-def load_model_artifacts(filename):
-    with open(filename, 'rb') as f:
-        scaler = pickle.load(f)
-        model = pickle.load(f)
-    return scaler, model
-
-def run_regression_app(df):
-    st.subheader("Regression App")
     
-    # Load the regression model artifacts
-    scaler_reg, model_reg = load_model_artifacts('regression_model_artifacts.pkl')
 
-    # Input features for regression
-    st.sidebar.subheader("Input Features for Regression")
-    quantity_tons = st.sidebar.number_input("Quantity in tons", min_value=0.01, max_value=10000.0, value=1.0)
-    country = st.sidebar.selectbox("Country", sorted(df['country'].unique()))
-    application = st.sidebar.selectbox("Application", sorted(df['application'].unique()))
-    thickness = st.sidebar.number_input("Thickness", min_value=0.1, max_value=100.0, value=1.0)
-    width = st.sidebar.number_input("Width", min_value=0.1, max_value=100.0, value=1.0)
-    delivery_period = st.sidebar.number_input("Delivery Period (days)", min_value=0, max_value=365, value=30)
-
-    # Preprocess the input data
-    input_data = np.array([[quantity_tons, country, application, thickness, width, delivery_period]])
-    input_data_scaled = scaler_reg.transform(input_data)
-
-    if st.sidebar.button("Predict Selling Price"):
-        # Make prediction using the regression model
-        selling_price_pred = model_reg.predict(input_data_scaled)[0]
-
-        st.write("Predicted Selling Price: {:.2f}".format(selling_price_pred))
-
-def run_classification_app(df):
-    st.subheader("Classification App")
+# Define a function for the Regression model
+def Regression_model():
+    col1, col2, col3 = st.columns(3)
     
-    # Load the classification model artifacts
-    scaler_clf, model_clf = load_model_artifacts('classification_model_artifacts.pkl')
+    with col2:
+        custom_style = """
+        <style>
+            .input-field {
+                background-color: white;
+                color: white; /* Set font color to white */
+                border: 1px solid blue;
+                border-radius: 5px;
+                padding: 10px;
+                width: 100%;
+            }
+            .custom-header {
+                color: white; /* Set font color of header to white */
+            }
+        </style>
+        """
+        st.markdown(custom_style, unsafe_allow_html=True)
+        
+        # Markdown header with white font color
+        st.markdown("<h3 class='custom-header'>Enter the following information to predict the selling price</h3>", unsafe_allow_html=True)
+        
+        # Input fields with white font color
+        st.markdown("<h4 class='custom-header'>Quantity in tons</h4>", unsafe_allow_html=True)
+        quantity_tons = st.number_input("", value=100.0, format="%.2f")
+        
+        st.markdown("<h4 class='custom-header'>Country</h4>", unsafe_allow_html=True)
+        country = st.number_input("", value=10)
+        
+        st.markdown("<h4 class='custom-header'>Application</h4>", unsafe_allow_html=True)
+        application = st.number_input("", value=0)
+        
+        st.markdown("<h4 class='custom-header'>Thickness</h4>", unsafe_allow_html=True)
+        thickness = st.number_input("", value=5.0, format="%.2f")
+        
+        st.markdown("<h4 class='custom-header'>Width</h4>", unsafe_allow_html=True)
+        width = st.number_input("", value=10.0, format="%.2f")
+        
+        st.markdown("<h4 class='custom-header'>Delivery Period (days)</h4>", unsafe_allow_html=True)
+        delivery_period = st.number_input("", value=30)
+        
+        
+        if st.button("Predict"):
+            # Load the trained scaler and model
+            with open('scaling_regression.pkl', 'rb') as f:
+                scaler = pickle.load(f)
+            
+            with open('extra_trees_regression_model.pkl', 'rb') as f:
+                model = pickle.load(f)
 
-    # Input features for classification
-    st.sidebar.subheader("Input Features for Classification")
-    quantity_tons_clf = st.sidebar.number_input("Quantity in tons", min_value=0.01, max_value=10000.0, value=1.0)
-    country_clf = st.sidebar.selectbox("Country", sorted(df['country'].unique()))
-    application_clf = st.sidebar.selectbox("Application", sorted(df['application'].unique()))
-    thickness_clf = st.sidebar.number_input("Thickness", min_value=0.1, max_value=100.0, value=1.0)
-    width_clf = st.sidebar.number_input("Width", min_value=0.1, max_value=100.0, value=1.0)
-    delivery_period_clf = st.sidebar.number_input("Delivery Period (days)", min_value=0, max_value=365, value=30)
+            # Create a DataFrame with user input
+            user_input = pd.DataFrame({
+                'quantity_tons': [quantity_tons],
+                'country': [country],
+                'application': [application],
+                'thickness': [thickness],
+                'width': [width],
+                'delivery_period': [delivery_period]
+            })
 
-    # Preprocess the input data
-    input_data_clf = np.array([[quantity_tons_clf, country_clf, application_clf, thickness_clf, width_clf, delivery_period_clf]])
-    input_data_scaled_clf = scaler_clf.transform(input_data_clf)
+            # Preprocess user input and make a prediction
+            #user_input['country'] = user_input['country'].astype(str)
+            #user_input['application'] = user_input['application'].astype(str)
+            x = user_input[['quantity_tons', 'country', 'application', 'thickness', 'width', 'delivery_period']].values
+            x = scaler.transform(x)
+            predicted_price = model.predict(x)
 
-    if st.sidebar.button("Predict Status"):
-        # Make prediction using the classification model
-        status_pred = model_clf.predict(input_data_scaled_clf)[0]
+            st.success(f"Predicted Selling Price: {predicted_price:.2f}")
+            container = st.container()
+            container.write(f"Predicted Selling Price: {predicted_price:.2f}")
 
-        st.write("Predicted Status: {}".format(status_pred))
+# Define a function to train classification models
+def train_classification(df):
+    df_classification = df.loc[df["status"].isin(['Won', 'Lost'])]
+    x = df_classification[['quantity_tons', 'country', 'application', 'thickness', 'width', 'selling_price', 'delivery_period']].values
+    y = df_classification[['status']].values
+    le = LabelEncoder()
+    y = le.fit_transform(y)
 
+    # Split the data into training and testing sets
+    X_train, X_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=42)
 
-if __name__ == "__main__":
-    # Read data from CSV
-    df = pd.read_csv("Copper_Set.csv")
+    # Initialize the scaler and fit it on the training data
+    scaler = StandardScaler().fit(X_train)
 
-    # Preprocess data for regression and classification tasks
+    # Save the scaler using joblib
+    with open('scaling_classification.pkl', 'wb') as f:
+        pickle.dump(scaler, f)
+
+    # Transform both training and testing data using the scaler
+    X_train = scaler.transform(X_train)
+    X_test = scaler.transform(X_test)
+
+    # Initialize the model and fit it on the training data
+    model = RandomForestClassifier()
+    model.fit(X_train, y_train)
+
+    # Save the trained model using joblib
+
+    col1, col2, col3 = st.columns(3)
+    
+    with col2:
+        custom_style = """
+        <style>
+            .input-field {
+                background-color: white;
+                color: white; /* Set font color to white */
+                border: 1px solid blue;
+                border-radius: 5px;
+                padding: 10px;
+                width: 100%;
+            }
+            .custom-header {
+                color: white; /* Set font color of header to white */
+            }
+        </style>
+        """
+        st.markdown(custom_style, unsafe_allow_html=True)
+        
+        # Markdown header with white font color
+        st.markdown("<h3 class='custom-header'>Enter the following information to predict the status</h3>", unsafe_allow_html=True)
+        
+        # Input fields with white font color
+        st.markdown("<h4 class='custom-header'>Quantity in tons</h4>", unsafe_allow_html=True)
+        quantity_tons = st.number_input("", value=100.0, format="%.2f")
+        
+        st.markdown("<h4 class='custom-header'>Country</h4>", unsafe_allow_html=True)
+        country = st.number_input("",value=10)
+        
+        st.markdown("<h4 class='custom-header'>Application</h4>", unsafe_allow_html=True)
+        application = st.number_input("",Value=5)
+        
+        st.markdown("<h4 class='custom-header'>Thickness</h4>", unsafe_allow_html=True)
+        thickness = st.number_input("", value=5.0, format="%.2f")
+        
+        st.markdown("<h4 class='custom-header'>Width</h4>", unsafe_allow_html=True)
+        width = st.number_input("", value=10.0, format="%.2f")
+        
+        st.markdown("<h4 class='custom-header'>Selling Price</h4>", unsafe_allow_html=True)
+        selling_price = st.number_input("", value=50.0, format="%.2f")
+        
+        st.markdown("<h4 class='custom-header'>Delivery Period (days)</h4>", unsafe_allow_html=True)
+        delivery_period = st.number_input("", value=30)
+        
+        if st.button("Predict"):
+            # Load the trained scaler and model
+            #scaler = joblib.load('scaling_classification.pkl')
+            #model = joblib.load('random_forest_classification_model.pkl')
+    
+            # Create a DataFrame with user input
+            user_input = pd.DataFrame({
+                'quantity_tons': [quantity_tons],
+                'country': [country],
+                'application': [application],
+                'thickness': [thickness],
+                'width': [width],
+                'selling_price': [selling_price],
+                'delivery_period': [delivery_period]
+            })
+    
+            # Preprocess user input and make a prediction
+            #user_input['country'] = user_input['country'].astype(str)
+            #user_input['application'] = user_input['application'].astype(str)
+            x = user_input[['quantity_tons', 'country', 'application', 'thickness', 'width', 'selling_price', 'delivery_period']].values
+            x = scaler.transform(x)
+            predicted_status = model.predict(x)
+            if predicted_status==1:
+                predicted_status="Won"
+            else:
+                predicted_status="Lost"
+    
+            st.success(f"Predicted Status: {predicted_status}")
+if __name__ == '__main__':
+    # Configure Streamlit page
+    page_config()
+    
+    # Display navigation menu and select model
+    selected = display_navigation()
+    
+    # Load the dataset
+    df = pd.read_csv('Copper_Set.csv')
+    
+    # Preprocess the data
     preprocess_data(df)
-    df_regression = df.copy()
-    df_classification = df.copy()
-
-    # Remove outliers for regression task
-    df_regression = remove_outliers(df_regression)
-
-    # Transform skewed columns for regression task
-    transform_skewed_columns(df_regression)
-
-    # Train and evaluate regression models
-    x_regression = df_regression[['quantity_tons', 'country', 'application', 'thickness', 'width', 'delivery_period']].values
-    y_regression = df_regression[['selling_price']].values
-    X_train_reg, X_test_reg, Y_train_reg, Y_test_reg = train_test_split(x_regression, y_regression.reshape(-1), test_size=0.3)
-    mse_scores_reg, r2_scores_reg, mae_scores_reg = train_regression_models(X_train_reg, X_test_reg, Y_train_reg, Y_test_reg)
-
-    # Save regression model artifacts
-    scaler_reg = StandardScaler().fit(x_regression)
-    save_model_artifacts(scaler_reg, models[-1], 'regression_model_artifacts.pkl')
-
-    # Remove outliers for classification task
-    df_classification = remove_outliers(df_classification)
-
-    # Transform skewed columns for classification task
-    transform_skewed_columns(df_classification)
-
-    # Train and evaluate classification models
-    x_classification = df_classification[['quantity_tons', 'country', 'application', 'thickness', 'width', 'selling_price', 'delivery_period']].values
-    y_classification = df_classification[['status']].values
-    X_train_clf, X_test_clf, y_train_clf, y_test_clf = train_test_split(x_classification, y_classification, test_size=0.2, random_state=42)
-    accuracy_scores_clf, f1_scores_clf, roc_auc_scores_clf, conf_matrices_clf = train_classification_models(X_train_clf, X_test_clf, y_train_clf, y_test_clf)
-
-    # Save classification model artifacts
-    scaler_clf = StandardScaler().fit(x_classification)
-    save_model_artifacts(scaler_clf, models[-2], 'classification_model_artifacts.pkl')
-
-    # Run Streamlit apps
-    run_regression_app(df_regression)
-    run_classification_app(df_classification)
+    df = remove_outliers(df)
+    transform_skewed_columns(df)
+    
+    # Train and run models based on user selection
+    if selected == "Regression":
+        train_regression_models(df)
+        Regression_model()
+    elif selected == "Classification":
+        train_classification(df)
