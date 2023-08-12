@@ -272,10 +272,10 @@ def train_classification(df):
         quantity_tons = st.number_input("", value=100.0, format="%.2f")
         
         st.markdown("<h4 class='custom-header'>Country</h4>", unsafe_allow_html=True)
-        country = st.number_input("",value=10)
+        country = st.number_input("", value=10)
         
         st.markdown("<h4 class='custom-header'>Application</h4>", unsafe_allow_html=True)
-        application = st.number_input("",Value=0)
+        application = st.number_input("", value=0)
         
         st.markdown("<h4 class='custom-header'>Thickness</h4>", unsafe_allow_html=True)
         thickness = st.number_input("", value=5.0, format="%.2f")
